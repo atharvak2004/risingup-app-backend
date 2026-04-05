@@ -15,6 +15,7 @@ class School(models.Model):
 
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return self.name
@@ -24,6 +25,9 @@ class Grade(models.Model):
     school = models.ForeignKey(School, on_delete=models.CASCADE, related_name="grades")
     name = models.CharField(max_length=50)  # Example: "1st Standard"
     order = models.PositiveIntegerField(default=1)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         unique_together = ("school", "name")
@@ -38,6 +42,9 @@ class Section(models.Model):
     grade = models.ForeignKey(Grade, on_delete=models.CASCADE, related_name="sections")
     name = models.CharField(max_length=10)  # "A", "B", "C"
 
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
     class Meta:
         unique_together = ("grade", "name")
 
@@ -45,11 +52,12 @@ class Section(models.Model):
         return f"{self.grade.name} - Section {self.name}"
 
 
+from django.db import models
+import uuid
+from django.utils import timezone
+
 class SchoolRegistration(models.Model):
-    """
-    Used by your REGISTRATION WEBSITE.
-    School submits this form → superadmin approves → actual School created.
-    """
+
     STATUS = (
         ("PENDING", "Pending"),
         ("APPROVED", "Approved"),
@@ -57,14 +65,24 @@ class SchoolRegistration(models.Model):
     )
 
     school_name = models.CharField(max_length=255)
-    contact_person = models.CharField(max_length=255)
-    email = models.EmailField()
-    phone = models.CharField(max_length=20)
-    message = models.TextField(blank=True)
+    school_email = models.EmailField()
+    school_contact = models.CharField(max_length=20)
+
+    school_address = models.TextField(blank=True)
+    school_website = models.URLField(blank=True)
+
+    school_affiliation = models.CharField(max_length=255, blank=True)
+    school_trust = models.CharField(max_length=255, blank=True)
+    school_gst_number = models.CharField(max_length=50, blank=True)
+
+    school_principal_name = models.CharField(max_length=255, blank=True)
+    school_principal_contact = models.CharField(max_length=20, blank=True)
+    school_principal_email = models.EmailField(blank=True)
 
     status = models.CharField(max_length=20, choices=STATUS, default="PENDING")
 
     token = models.UUIDField(default=uuid.uuid4, unique=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     processed_at = models.DateTimeField(null=True, blank=True)
 

@@ -2,9 +2,6 @@ from django.db import models
 from django.conf import settings
 
 
-# ------------------------------
-# SERVICE MODEL
-# ------------------------------
 class Service(models.Model):
     """
     Example services: Life Skills, Coding, STEM, Financial Literacy
@@ -21,6 +18,9 @@ class Service(models.Model):
 
     is_active = models.BooleanField(default=True)
 
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
     class Meta:
         unique_together = ("school", "code")
 
@@ -28,9 +28,6 @@ class Service(models.Model):
         return f"{self.school.name} - {self.name}"
 
 
-# ------------------------------
-# THEORY (TOPICS + SUBTOPICS)
-# ------------------------------
 class TheoryTopic(models.Model):
     """
     Nested theory structure:
@@ -54,6 +51,9 @@ class TheoryTopic(models.Model):
 
     order = models.PositiveIntegerField(default=1)
 
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
     class Meta:
         ordering = ["order"]
 
@@ -61,9 +61,6 @@ class TheoryTopic(models.Model):
         return self.title
 
 
-# ------------------------------
-# CASE STUDY
-# ------------------------------
 class CaseStudy(models.Model):
     school = models.ForeignKey("core.School", on_delete=models.CASCADE)
     service = models.ForeignKey(Service, on_delete=models.CASCADE, related_name="case_studies")
@@ -73,8 +70,11 @@ class CaseStudy(models.Model):
     description = models.TextField()
     image = models.ImageField(upload_to="case_study_images/", null=True, blank=True)
 
+    order = models.PositiveIntegerField(default=1)
+
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -84,13 +84,13 @@ class CaseStudy(models.Model):
         related_name="created_case_studies",
     )
 
+    class Meta:
+        ordering = ["order"]
+
     def __str__(self):
         return f"{self.title} ({self.grade.name})"
 
 
-# ------------------------------
-# QUESTIONS
-# ------------------------------
 class Question(models.Model):
     case_study = models.ForeignKey(
         CaseStudy,
@@ -100,6 +100,9 @@ class Question(models.Model):
     text = models.TextField()
     order = models.PositiveIntegerField(default=1)
 
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
     class Meta:
         ordering = ["order"]
 
@@ -107,9 +110,6 @@ class Question(models.Model):
         return f"Q{self.order}: {self.text[:40]}"
 
 
-# ------------------------------
-# ANSWER OPTIONS (MCQ)
-# ------------------------------
 class AnswerOption(models.Model):
     question = models.ForeignKey(
         Question,
@@ -119,13 +119,13 @@ class AnswerOption(models.Model):
     text = models.CharField(max_length=255)
     is_correct = models.BooleanField(default=False)
 
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
     def __str__(self):
         return f"Option: {self.text[:40]}"
 
 
-# ------------------------------
-# STUDENT ATTEMPTS + RESULTS
-# ------------------------------
 class StudentCaseStudyAttempt(models.Model):
     student = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -145,6 +145,9 @@ class StudentCaseStudyAttempt(models.Model):
     correct_answers = models.PositiveIntegerField(default=0)
     score = models.FloatField(default=0)   # percentage
 
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
     def __str__(self):
         return f"{self.student.username} → {self.case_study.title} ({self.score}%)"
 
@@ -161,5 +164,22 @@ class StudentAnswer(models.Model):
     )
     is_correct = models.BooleanField(default=False)
 
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
     def __str__(self):
         return f"{self.attempt.student.username} - {self.question.id}"
+    
+class CaseStudyAccess(models.Model):
+    school = models.ForeignKey("core.School", on_delete=models.CASCADE)
+    case_study = models.ForeignKey("learning.CaseStudy", on_delete=models.CASCADE)
+
+    is_locked = models.BooleanField(default=False)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("school", "case_study")
+
+    def __str__(self):
+        return f"{self.school.name} - {self.case_study.title} - {'Locked' if self.is_locked else 'Unlocked'}"

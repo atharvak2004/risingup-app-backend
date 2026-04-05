@@ -45,6 +45,9 @@ class StudentProfile(models.Model):
     )
     admission_no = models.CharField(max_length=50, blank=True)
 
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
     def __str__(self):
         return f"Student: {self.user.username}"
 
@@ -62,6 +65,9 @@ class StaffProfile(models.Model):
     assigned_section = models.ForeignKey(
         "core.Section", on_delete=models.SET_NULL, null=True, blank=True
     )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return f"Staff: {self.user.username}"

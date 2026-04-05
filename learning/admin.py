@@ -2,7 +2,8 @@ from django.contrib import admin
 from .models import (
     Service, TheoryTopic, CaseStudy,
     Question, AnswerOption,
-    StudentCaseStudyAttempt, StudentAnswer
+    StudentCaseStudyAttempt, StudentAnswer,
+    CaseStudyAccess   # 🔥 NEW IMPORT
 )
 
 # ---------------------------
@@ -26,6 +27,17 @@ class TheoryTopicAdmin(admin.ModelAdmin):
 
 
 # ---------------------------
+# 🔥 CASE STUDY ACCESS (LOCK/UNLOCK)
+# ---------------------------
+@admin.register(CaseStudyAccess)
+class CaseStudyAccessAdmin(admin.ModelAdmin):
+    list_display = ("school", "case_study", "is_locked", "created_at")
+    list_filter = ("school", "is_locked")
+    search_fields = ("school__name", "case_study__title")
+    list_editable = ("is_locked",)   # 🔥 toggle directly
+
+
+# ---------------------------
 # CASE STUDIES
 # ---------------------------
 class AnswerOptionInline(admin.TabularInline):
@@ -43,15 +55,20 @@ class QuestionInline(admin.TabularInline):
     ordering = ("order",)
 
 
+
 @admin.register(CaseStudy)
 class CaseStudyAdmin(admin.ModelAdmin):
-    list_display = ("title", "grade", "service")
-    list_filter = ("grade", "service")
+    list_display = ("title", "grade", "service", "school", "order", "is_active")
+    list_filter = ("grade", "service", "school", "is_active")
     search_fields = ("title", "description")
     inlines = [QuestionInline]
-    ordering = ("grade", "service", "id")
 
+    ordering = ("order",)               # 🔥 sort by order
+    list_editable = ("order",)          # 🔥 inline editing
 
+# ---------------------------
+# QUESTIONS
+# ---------------------------
 @admin.register(Question)
 class QuestionAdmin(admin.ModelAdmin):
     list_display = ("text", "case_study", "order")
@@ -62,7 +79,7 @@ class QuestionAdmin(admin.ModelAdmin):
 
 
 # ---------------------------
-# STUDENT ATTEMPTS
+# STUDENT ATTEMPTS (ANALYTICS)
 # ---------------------------
 @admin.register(StudentCaseStudyAttempt)
 class StudentCaseStudyAttemptAdmin(admin.ModelAdmin):
@@ -89,6 +106,6 @@ class StudentAnswerAdmin(admin.ModelAdmin):
 # ---------------------------
 @admin.register(Service)
 class ServiceAdmin(admin.ModelAdmin):
-    list_display = ("name", "school")
-    list_filter = ("school",)
+    list_display = ("name", "school", "is_active")
+    list_filter = ("school", "is_active")
     search_fields = ("name",)
