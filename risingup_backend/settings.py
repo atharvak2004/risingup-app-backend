@@ -43,6 +43,7 @@ if DEBUG:
         "http://localhost:5173",
         "https://risingup-student-website.vercel.app",
         "https://risingup-app-backend.onrender.com",
+        "http://localhost:5174"
     ]
 else:
     CSRF_TRUSTED_ORIGINS = [
@@ -51,6 +52,7 @@ else:
         "https://api.risingup.in",
          "https://risingup-student-website.vercel.app",
          "https://risingup-app-backend.onrender.com",
+         "http://localhost:5174"
     ]
 
 # -----------------------------
@@ -103,6 +105,7 @@ else:
         "https://admin.risingup.in",
         "https://risingup-student-website.vercel.app",
         "https://risingup-app-backend.onrender.com",
+        "http://localhost:5174"
     ]
 
 CORS_ALLOW_CREDENTIALS = True
