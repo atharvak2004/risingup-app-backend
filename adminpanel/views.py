@@ -33,6 +33,25 @@ import unicodedata
 from core.models import Grade
 from rest_framework.generics import ListAPIView
 from rest_framework import serializers
+import io
+
+def get_csv_reader(file):
+    """
+    Robust CSV reader that handles UTF-8, BOM, and Excel encodings.
+    """
+    file_data = file.read()
+
+    try:
+        decoded = file_data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        decoded = file_data.decode("latin-1")  # fallback for Windows CSV
+
+    reader = csv.DictReader(io.StringIO(decoded))
+
+    # Normalize headers (strip spaces)
+    reader.fieldnames = [h.strip() for h in reader.fieldnames]
+
+    return reader
 
 def generate_school_code():
     return f"SCH-{uuid.uuid4().hex[:6].upper()}"
@@ -504,81 +523,130 @@ class BulkQuestionUploadAPIView(APIView):
     permission_classes = [IsAuthenticated, IsSuperAdmin]
 
     def post(self, request):
-        file = request.FILES.get("file")
-        if not file:
-            return Response({"error": "CSV file is required"}, status=400)
+        try:
+            file = request.FILES.get("file")
+            if not file:
+                return Response({"error": "CSV file is required"}, status=400)
 
-        reader = csv.DictReader(TextIOWrapper(file.file, encoding="utf-8-sig"))
+            reader = get_csv_reader(file)
 
-        created, errors = [], []
+            created, errors = [], []
 
-        for index, row in enumerate(reader, start=2):
-            try:
-                case_study = CaseStudy.objects.get(
-                    title__iexact=normalize(row["Case Study Title"])
-                )
+            for index, row in enumerate(reader, start=2):
+                try:
+                    row = {k.strip(): v for k, v in row.items()}
 
-                Question.objects.create(
-                    case_study=case_study,
-                    text=normalize(row["Question Text"]),
-                    order=int(row.get("Order", 1))
-                )
+                    case_study_title = normalize(row.get("Case Study Title"))
+                    question_text = normalize(row.get("Question Text"))
 
-                created.append(index)
+                    if not case_study_title or not question_text:
+                        raise ValueError("Missing required fields")
 
-            except Exception as e:
-                errors.append({"row": index, "error": str(e)})
+                    case_study = CaseStudy.objects.filter(
+                        title__icontains=case_study_title
+                    ).first()
 
-        return Response({
-            "created_count": len(created),
-            "errors": errors
-        })
+                    if not case_study:
+                        raise ValueError(f'Case Study "{case_study_title}" not found')
 
+                    order_value = row.get("Order")
+                    try:
+                        order = int(order_value) if order_value else 1
+                    except:
+                        order = 1
+
+                    Question.objects.create(
+                        case_study=case_study,
+                        text=question_text,
+                        order=order
+                    )
+
+                    created.append(index)
+
+                except Exception as e:
+                    errors.append({"row": index, "error": str(e)})
+
+            return Response({
+                "created_count": len(created),
+                "errors": errors
+            })
+
+        except Exception as e:
+            return Response(
+                {"error": f"Server error: {str(e)}"},
+                status=500
+            )
 
 class BulkOptionUploadAPIView(APIView):
     permission_classes = [IsAuthenticated, IsSuperAdmin]
 
     def post(self, request):
-        file = request.FILES.get("file")
-        if not file:
-            return Response({"error": "CSV file is required"}, status=400)
+        try:
+            file = request.FILES.get("file")
+            if not file:
+                return Response({"error": "CSV file is required"}, status=400)
 
-        reader = csv.DictReader(TextIOWrapper(file.file, encoding="utf-8-sig"))
-        created, errors = [], []
+            reader = get_csv_reader(file)
 
-        for index, row in enumerate(reader, start=2):
-            try:
-                case = CaseStudy.objects.get(
-                    title__iexact=normalize(row["Case Study Title"])
-                )
+            created, errors = [], []
 
-                question = Question.objects.get(
-                    text__iexact=normalize(row["Question Text"]),
-                    case_study=case
-                )
+            for index, row in enumerate(reader, start=2):
+                try:
+                    row = {k.strip(): v for k, v in row.items()}
 
-                is_correct = normalize(row["Is Correct (yes/no)"]).lower() in ["yes", "true"]
+                    case_title = normalize(row.get("Case Study Title"))
+                    question_text = normalize(row.get("Question Text"))
+                    option_text = normalize(row.get("Option Text"))
 
-                if is_correct:
-                    AnswerOption.objects.filter(
-                        question=question, is_correct=True
-                    ).update(is_correct=False)
+                    if not case_title or not question_text or not option_text:
+                        raise ValueError("Missing required fields")
 
-                AnswerOption.objects.create(
-                    question=question,
-                    text=normalize(row["Option Text"]),
-                    is_correct=is_correct
-                )
+                    case = CaseStudy.objects.filter(
+                        title__icontains=case_title
+                    ).first()
 
-                created.append(index)
+                    if not case:
+                        raise ValueError(f'Case Study "{case_title}" not found')
 
-            except Exception as e:
-                errors.append({"row": index, "error": str(e)})
+                    question = Question.objects.filter(
+                        text__icontains=question_text,
+                        case_study=case
+                    ).first()
 
-        return Response({
-            "created_count": len(created),
-            "errors": errors
-        })
+                    if not question:
+                        raise ValueError(f'Question not found: "{question_text}"')
+
+                    is_correct = normalize(
+                        row.get("Is Correct (yes/no)")
+                    ).lower() in ["yes", "true", "1"]
+
+                    if is_correct:
+                        AnswerOption.objects.filter(
+                            question=question,
+                            is_correct=True
+                        ).update(is_correct=False)
+
+                    AnswerOption.objects.create(
+                        question=question,
+                        text=option_text,
+                        is_correct=is_correct
+                    )
+
+                    created.append(index)
+
+                except Exception as e:
+                    errors.append({"row": index, "error": str(e)})
+
+            return Response({
+                "created_count": len(created),
+                "errors": errors
+            })
+
+        except Exception as e:
+            return Response(
+                {"error": f"Server error: {str(e)}"},
+                status=500
+            )
 
 class BulkTheoryTopicUploadAPIView(APIView):
     permission_classes = [IsAuthenticated, IsSuperAdmin]
@@ -641,70 +709,74 @@ class BulkCaseStudyUploadAPIView(APIView):
     permission_classes = [IsAuthenticated, IsSuperAdmin]
 
     def post(self, request):
-        file = request.FILES.get("file")
-        if not file:
-            return Response({"error": "CSV file is required"}, status=400)
+        try:
+            file = request.FILES.get("file")
+            if not file:
+                return Response({"error": "CSV file is required"}, status=400)
 
-        reader = csv.DictReader(
-            TextIOWrapper(file.file, encoding="utf-8-sig")
-        )
+            reader = get_csv_reader(file)
 
-        created, errors = [], []
+            created, errors = [], []
 
-        for index, row in enumerate(reader, start=2):
-            try:
-                # 🔒 FIX HEADER ISSUES
-                row = {k.strip(): v for k, v in row.items()}
+            for index, row in enumerate(reader, start=2):
+                try:
+                    row = {k.strip(): v for k, v in row.items()}
 
-                school_name = normalize(row.get("School Name"))
-                service_name = normalize(row.get("Service Name"))
-                grade_name = normalize(row.get("Grade Name"))
+                    school_name = normalize(row.get("School Name"))
+                    service_name = normalize(row.get("Service Name"))
+                    grade_name = normalize(row.get("Grade Name"))
 
-                if not school_name:
-                    raise ValueError("School Name column is missing or empty in CSV")
+                    if not school_name:
+                        raise ValueError("School Name is required")
 
-                school = School.objects.filter(
-                    name__iexact=school_name
-                ).first()
-                if not school:
-                    raise ValueError(
-                        f'School "{school_name}" not found. '
-                        f'Available: {list_names(School.objects.all())}'
+                    school = School.objects.filter(
+                        name__iexact=school_name
+                    ).first()
+
+                    if not school:
+                        raise ValueError(f'School "{school_name}" not found')
+
+                    service = Service.objects.filter(
+                        name__iexact=service_name,
+                        school=school
+                    ).first()
+
+                    if not service:
+                        raise ValueError(f'Service "{service_name}" not found')
+
+                    grade = Grade.objects.filter(
+                        name__iexact=grade_name,
+                        school=school
+                    ).first()
+
+                    if not grade:
+                        raise ValueError(f'Grade "{grade_name}" not found')
+
+                    case = CaseStudy.objects.create(
+                        school=school,
+                        service=service,
+                        grade=grade,
+                        title=normalize(row.get("Topic Title")),
+                        description=normalize(row.get("Description")),
+                        created_by=request.user,
                     )
 
-                service = Service.objects.filter(
-                    name__iexact=service_name,
-                    school=school
-                ).first()
-                if not service:
-                    raise ValueError(f'Service "{service_name}" not found')
+                    created.append({"row": index, "id": case.id})
 
-                grade = Grade.objects.filter(
-                    name__iexact=grade_name,
-                    school=school
-                ).first()
-                if not grade:
-                    raise ValueError(f'Grade "{grade_name}" not found')
+                except Exception as e:
+                    errors.append({"row": index, "error": str(e)})
 
-                case = CaseStudy.objects.create(
-                    school=school,
-                    service=service,
-                    grade=grade,
-                    title=normalize(row.get("Topic Title")),
-                    description=normalize(row.get("Description")),
-                    created_by=request.user,
-                )
+            return Response({
+                "created_count": len(created),
+                "created": created,
+                "errors": errors
+            })
 
-                created.append({"row": index, "id": case.id})
-
-            except Exception as e:
-                errors.append({"row": index, "error": str(e)})
-
-        return Response({
-            "created_count": len(created),
-            "created": created,
-            "errors": errors
-        })
+        except Exception as e:
+            return Response(
+                {"error": f"Server error: {str(e)}"},
+                status=500
+            )
 class SchoolRegistrationListAPIView(ListAPIView):
     permission_classes = [IsAuthenticated, IsSuperAdmin]
     serializer_class = SchoolRegistrationListSerializer
