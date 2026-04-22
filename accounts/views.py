@@ -192,41 +192,62 @@ class StudentLoginView(APIView):
 
         refresh = RefreshToken.for_user(user)
 
-        # Student profile
+        # -----------------------------
+        # STUDENT PROFILE DATA
+        # -----------------------------
+        grade_id = None
         grade_name = None
+        section_id = None
         section_name = None
         admission_no = None
 
         if hasattr(user, "student_profile"):
-            grade = user.student_profile.grade
-            section = user.student_profile.section
+            profile = user.student_profile
 
-            grade_name = grade.name if grade else None
-            section_name = section.name if section else None
-            admission_no = user.student_profile.admission_no
+            if profile.grade:
+                grade_id = profile.grade.id
+                grade_name = profile.grade.name
 
-        return Response({
-            "access": str(refresh.access_token),
-            "refresh": str(refresh),
-            "user": {
-                "id": user.id,
-                "username": user.username,
-                "full_name": user.get_full_name(),
-                "email": user.email,
-                "role": user.role,
-                "phone": user.phone,
-                "school_id": user.school.id if user.school else None,
-                "school_name": user.school.name if user.school else None,
+            if profile.section:
+                section_id = profile.section.id
+                section_name = profile.section.name
 
-                # Student fields
-                "grade_name": grade_name,
-                "section_name": section_name,
-                "admission_no": admission_no,
+            admission_no = profile.admission_no
 
-                # flags
-                "is_first_login": user.is_first_login,
-            }
-        })
+        # -----------------------------
+        # RESPONSE
+        # -----------------------------
+        return Response(
+            {
+                "access": str(refresh.access_token),
+                "refresh": str(refresh),
+                "user": {
+                    "id": user.id,
+                    "username": user.username,
+                    "full_name": user.get_full_name(),
+                    "email": user.email,
+                    "role": user.role,
+                    "phone": user.phone,
+
+                    # School
+                    "school_id": user.school.id if user.school else None,
+                    "school_name": user.school.name if user.school else None,
+
+                    # ✅ IMPORTANT FIX
+                    "grade_id": grade_id,
+                    "grade_name": grade_name,
+
+                    "section_id": section_id,
+                    "section_name": section_name,
+
+                    "admission_no": admission_no,
+
+                    # Flags
+                    "is_first_login": user.is_first_login,
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
         
 class StudentProfileView(APIView):
     permission_classes = [IsAuthenticated]

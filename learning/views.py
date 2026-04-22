@@ -94,9 +94,6 @@ class TheoryTopicDetailView(generics.RetrieveAPIView):
 from django.db.models import Max, Q, OuterRef, Subquery
 
 class CaseStudyListView(generics.ListAPIView):
-    """
-    List case studies for a grade + service.
-    """
     serializer_class = CaseStudyListSerializer
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
@@ -110,13 +107,35 @@ class CaseStudyListView(generics.ListAPIView):
 
         qs = CaseStudy.objects.filter(is_active=True)
 
+        # ✅ Always filter by user's school
         if user.school:
             qs = qs.filter(school=user.school)
 
-        if service_id:
-            qs = qs.filter(service_id=service_id)
-        if grade_id:
-            qs = qs.filter(grade_id=grade_id)
+        # ✅ Safe parsing for service_id
+        try:
+            if service_id:
+                service_id = int(service_id)
+                qs = qs.filter(service_id=service_id)
+        except (ValueError, TypeError):
+            pass  # ignore invalid input
+
+        # ✅ Safe parsing for grade_id
+        try:
+            if grade_id:
+                grade_id = int(grade_id)
+                qs = qs.filter(grade_id=grade_id)
+        except (ValueError, TypeError):
+            pass  # ignore invalid input
+
+        # 🔥 DEBUG (remove later)
+        print("---- DEBUG CASE STUDY FILTER ----")
+        print("USER:", user.id)
+        print("USER SCHOOL:", user.school_id)
+        print("SERVICE ID:", service_id)
+        print("GRADE ID:", grade_id)
+        print("TOTAL CASE STUDIES:", CaseStudy.objects.count())
+        print("FILTERED COUNT:", qs.count())
+        print("--------------------------------")
 
         # 🔥 BEST SCORE
         qs = qs.annotate(
@@ -126,15 +145,11 @@ class CaseStudyListView(generics.ListAPIView):
             )
         )
 
-        # 🔥 LOCK STATUS (IMPORTANT)
+        # 🔥 LOCK STATUS
         access_subquery = CaseStudyAccess.objects.filter(
-            school_id=user.school_id,   # ✅ FIXED
-            case_study_id=OuterRef("pk")  # ✅ FIXED
+            school_id=user.school_id,
+            case_study_id=OuterRef("pk")
         ).values("is_locked")[:1]
-
-        print("USER:", user)
-        print("USER SCHOOL:", user.school)
-        print("USER SCHOOL ID:", user.school_id)
 
         qs = qs.annotate(
             is_locked=Coalesce(
@@ -143,11 +158,6 @@ class CaseStudyListView(generics.ListAPIView):
                 output_field=BooleanField()
             )
         )
-
-        print("---- DEBUG CASE STUDIES ----")
-        for c in qs:
-            print(f"Case {c.id} → is_locked: {c.is_locked}")
-        print("----------------------------")
 
         return qs.order_by("order").select_related("grade", "service")
     
