@@ -13,7 +13,7 @@ from rest_framework.generics import ListAPIView
 from django.db.models import Q
 from django.db.models import OuterRef, Subquery, Value, BooleanField
 from django.db.models.functions import Coalesce
-
+from django.db import transaction
 from .serializers import AdminCaseStudySerializer, AdminTheoryTopicSerializer, AdminUserListSerializer, SchoolListSerializer, SchoolRegistrationListSerializer, AdminServiceSerializer,AdminQuestionSerializer,AdminAnswerOptionSerializer
 from django.shortcuts import get_object_or_404
 from accounts.models import User, StudentProfile, StaffProfile
@@ -34,7 +34,7 @@ from core.models import Grade
 from rest_framework.generics import ListAPIView
 from rest_framework import serializers
 import io
-
+from learning.models import CaseStudyAccess 
 def get_csv_reader(file):
     """
     Robust CSV reader that handles UTF-8, BOM, and Excel encodings.
@@ -708,6 +708,9 @@ class BulkTheoryTopicUploadAPIView(APIView):
 class BulkCaseStudyUploadAPIView(APIView):
     permission_classes = [IsAuthenticated, IsSuperAdmin]
 
+    def parse_bool(self, value):
+        return str(value).strip().lower() in ["true", "1", "yes"]
+
     def post(self, request):
         try:
             file = request.FILES.get("file")
@@ -716,59 +719,88 @@ class BulkCaseStudyUploadAPIView(APIView):
 
             reader = get_csv_reader(file)
 
-            created, errors = [], []
+            created, updated, errors = [], [], []
 
-            for index, row in enumerate(reader, start=2):
-                try:
-                    row = {k.strip(): v for k, v in row.items()}
+            # ✅ preload for performance
+            schools = {s.name.lower(): s for s in School.objects.all()}
+            services = {(s.name.lower(), s.school_id): s for s in Service.objects.all()}
+            grades = {(g.name.lower(), g.school_id): g for g in Grade.objects.all()}
 
-                    school_name = normalize(row.get("School Name"))
-                    service_name = normalize(row.get("Service Name"))
-                    grade_name = normalize(row.get("Grade Name"))
+            with transaction.atomic():
+                for index, row in enumerate(reader, start=2):
+                    try:
+                        row = {k.strip(): v for k, v in row.items()}
 
-                    if not school_name:
-                        raise ValueError("School Name is required")
+                        school_name = normalize(row.get("School Name")).lower()
+                        service_name = normalize(row.get("Service Name")).lower()
+                        grade_name = normalize(row.get("Grade Name")).lower()
+                        title = normalize(row.get("Title"))
+                        description = normalize(row.get("Description"))
 
-                    school = School.objects.filter(
-                        name__iexact=school_name
-                    ).first()
+                        if not school_name or not title:
+                            raise ValueError("School Name and Title are required")
 
-                    if not school:
-                        raise ValueError(f'School "{school_name}" not found')
+                        # ✅ lookups
+                        school = schools.get(school_name)
+                        if not school:
+                            raise ValueError(f'School "{school_name}" not found')
 
-                    service = Service.objects.filter(
-                        name__iexact=service_name,
-                        school=school
-                    ).first()
+                        service = services.get((service_name, school.id))
+                        if not service:
+                            raise ValueError(f'Service "{service_name}" not found')
 
-                    if not service:
-                        raise ValueError(f'Service "{service_name}" not found')
+                        grade = grades.get((grade_name, school.id))
+                        if not grade:
+                            raise ValueError(f'Grade "{grade_name}" not found')
 
-                    grade = Grade.objects.filter(
-                        name__iexact=grade_name,
-                        school=school
-                    ).first()
+                        # ✅ ORDER
+                        try:
+                            order = int(row.get("Order") or 1)
+                        except:
+                            order = 1
 
-                    if not grade:
-                        raise ValueError(f'Grade "{grade_name}" not found')
+                        # ✅ ACTIVE
+                        is_active = self.parse_bool(row.get("Is Active", True))
 
-                    case = CaseStudy.objects.create(
-                        school=school,
-                        service=service,
-                        grade=grade,
-                        title=normalize(row.get("Topic Title")),
-                        description=normalize(row.get("Description")),
-                        created_by=request.user,
-                    )
+                        # ✅ LOCK (NEW)
+                        locked_value = row.get("Is Locked")
+                        is_locked = self.parse_bool(locked_value) if locked_value is not None else None
 
-                    created.append({"row": index, "id": case.id})
+                        # 🔥 UPDATE OR CREATE CASE STUDY
+                        case, created_flag = CaseStudy.objects.update_or_create(
+                            title__iexact=title,
+                            school=school,
+                            defaults={
+                                "service": service,
+                                "grade": grade,
+                                "description": description,
+                                "order": order,
+                                "is_active": is_active,
+                                "created_by": request.user,
+                            }
+                        )
 
-                except Exception as e:
-                    errors.append({"row": index, "error": str(e)})
+                        # 🔥 HANDLE LOCK (ONLY IF PROVIDED)
+                        if is_locked is not None:
+                            CaseStudyAccess.objects.update_or_create(
+                                school=school,
+                                case_study=case,
+                                defaults={"is_locked": is_locked}
+                            )
+
+                        if created_flag:
+                            created.append({"row": index, "id": case.id})
+                        else:
+                            updated.append({"row": index, "id": case.id})
+
+                    except Exception as e:
+                        errors.append({"row": index, "error": str(e)})
 
             return Response({
                 "created_count": len(created),
+                "updated_count": len(updated),
                 "created": created,
+                "updated": updated,
                 "errors": errors
             })
 
@@ -777,6 +809,8 @@ class BulkCaseStudyUploadAPIView(APIView):
                 {"error": f"Server error: {str(e)}"},
                 status=500
             )
+            
+            
 class SchoolRegistrationListAPIView(ListAPIView):
     permission_classes = [IsAuthenticated, IsSuperAdmin]
     serializer_class = SchoolRegistrationListSerializer
